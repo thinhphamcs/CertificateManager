@@ -1,0 +1,16 @@
+target/
+*.class
+*.log
+*.jar
+*.war
+.classpath
+.project
+.settings/
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+*.db
+src/main/resources/*
+!src/main/resources/.gitkeep
