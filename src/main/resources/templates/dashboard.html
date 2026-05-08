@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>CertificateManager</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+    <style>
+        body { background-color: #0f1117; }
+        .navbar-brand { font-weight: 700; letter-spacing: 1px; color: #58a6ff !important; }
+        .card { background-color: #1c1f26; border: 1px solid #2d3139; border-radius: 12px; }
+        .form-control { background-color: #13151a; border: 1px solid #2d3139; }
+        .form-control:focus { background-color: #13151a; border-color: #58a6ff; box-shadow: 0 0 0 0.2rem rgba(88,166,255,0.15); }
+        .form-control::placeholder { color: #5a6070; }
+        .btn-check-cert { background-color: #58a6ff; border: none; font-weight: 600; color: #0f1117; padding: 0.5rem 1.8rem; }
+        .btn-check-cert:hover { background-color: #79baff; color: #0f1117; }
+        .status-badge { font-size: 0.9rem; font-weight: 700; padding: 0.4rem 1rem; border-radius: 50px; }
+        .status-VALID    { background-color: #1a4731; color: #3fb950; }
+        .status-WARNING  { background-color: #3d2f0a; color: #d29922; }
+        .status-CRITICAL { background-color: #3d1a0a; color: #f0883e; }
+        .status-EXPIRED  { background-color: #3d0a0a; color: #f85149; }
+        .status-ERROR    { background-color: #2a2a2a; color: #8b949e; }
+        .info-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8b949e; margin-bottom: 2px; }
+        .info-value { font-size: 0.95rem; }
+        .info-raw   { font-size: 0.72rem; font-family: monospace; color: #5a6070; margin-top: 2px; word-break: break-all; }
+        .days-count { font-size: 2.5rem; font-weight: 700; line-height: 1; }
+        .san-pill { background-color: #13151a; border: 1px solid #2d3139; border-radius: 6px; font-size: 0.8rem; padding: 2px 8px; display: inline-block; margin: 2px; color: #8b949e; }
+        .divider { border-color: #2d3139; }
+        .hero-icon { font-size: 3rem; color: #58a6ff; }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark px-4 py-3" style="border-bottom: 1px solid #2d3139;">
+    <span class="navbar-brand"><i class="bi bi-shield-lock-fill me-2"></i>CertificateManager</span>
+    <span class="text-secondary small">SSL/TLS Lifecycle Audit Engine</span>
+</nav>
+
+<div class="container py-5">
+
+    <!-- Check Form -->
+    <div class="card p-4 mb-4">
+        <h5 class="mb-3 fw-semibold">Check a Certificate</h5>
+        <form action="/check" method="post">
+            <div class="d-flex gap-2">
+                <input type="text"
+                       class="form-control"
+                       name="url"
+                       th:value="${checkedUrl}"
+                       placeholder="e.g. google.com  or  https://internal-api.company.com:8443"
+                       required/>
+                <button type="submit" class="btn btn-check-cert">
+                    <i class="bi bi-search me-1"></i> Check
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Empty state -->
+    <div th:if="${result == null}" class="text-center py-5 text-secondary">
+        <div class="hero-icon mb-3"><i class="bi bi-shield-lock"></i></div>
+        <p class="mb-1 fs-5 fw-semibold text-body">No certificate checked yet</p>
+        <p class="small">Enter a hostname or URL above to inspect its SSL/TLS certificate.</p>
+    </div>
+
+    <!-- Result Card -->
+    <div th:if="${result != null}" class="card p-4">
+
+        <!-- Header row -->
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-4">
+            <div>
+                <h4 class="mb-0 fw-bold" th:text="${result.host}"></h4>
+                <span class="text-secondary small">
+                    Port <span th:text="${result.port}"></span>
+                    <span th:if="${result.port == 443}"> — standard HTTPS port, applied automatically</span>
+                    <span th:if="${result.port == 80}"> — standard HTTP port</span>
+                </span>
+            </div>
+            <span class="status-badge"
+                  th:classappend="'status-' + ${result.status}"
+                  th:text="${result.status}"></span>
+        </div>
+
+        <!-- Error state -->
+        <div th:if="${result.status == 'ERROR'}" class="alert" style="background:#1c1f26; border:1px solid #f85149; color:#f85149; border-radius:8px;">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+            <span th:text="${result.errorMessage}"></span>
+        </div>
+
+        <!-- Success details -->
+        <div th:if="${result.status != 'ERROR'}">
+
+            <!-- Days remaining highlight -->
+            <div class="text-center py-3 mb-4" style="border: 1px solid #2d3139; border-radius:10px;">
+                <div class="days-count"
+                     th:classappend="${result.daysUntilExpiry < 0} ? 'text-danger' : (${result.daysUntilExpiry < 30} ? 'text-warning' : 'text-success')"
+                     th:text="${result.daysUntilExpiry < 0} ? 'EXPIRED' : ${result.daysUntilExpiry} + ' days'"></div>
+                <div class="text-secondary small mt-1">until certificate expiry</div>
+            </div>
+
+            <hr class="divider"/>
+
+            <!-- Details grid -->
+            <div class="row g-4 mt-1">
+
+                <!-- Expiry Date -->
+                <div class="col-md-6">
+                    <div class="info-label">Expiry Date</div>
+                    <div class="info-value" th:text="${#dates.format(result.expiryDate, 'dd MMM yyyy, HH:mm z')}"></div>
+                </div>
+
+                <!-- Common Name (Subject) -->
+                <div class="col-md-6">
+                    <div class="info-label">Common Name — who this cert belongs to</div>
+                    <div class="info-value fw-semibold" th:text="${result.subjectCN}"></div>
+                </div>
+
+                <!-- Certificate Authority (Issuer) -->
+                <div class="col-md-6">
+                    <div class="info-label">Certificate Authority — who signed &amp; vouches for it</div>
+                    <div class="info-value fw-semibold" th:text="${result.issuerOrg}"></div>
+                    <div class="info-raw" th:text="${result.issuerDNFormatted}"></div>
+                </div>
+
+                <!-- SANs -->
+                <div class="col-12" th:if="${!result.subjectAlternativeNames.isEmpty()}">
+                    <div class="info-label">
+                        Valid For (Subject Alternative Names — <span th:text="${result.subjectAlternativeNames.size()}"></span> domains)
+                    </div>
+                    <div class="text-secondary small mb-1">Every hostname this single certificate covers. Browsers check this list to decide if the cert is valid for a given URL.</div>
+                    <div class="mt-1">
+                        <span th:each="san : ${result.subjectAlternativeNames}" class="san-pill" th:text="${san}"></span>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

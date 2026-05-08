@@ -12,5 +12,6 @@ target/
 .DS_Store
 Thumbs.db
 *.db
-src/main/resources/*
-!src/main/resources/.gitkeep
+# Ignore config files that may contain sensitive credentials
+src/main/resources/application*.yml
+src/main/resources/application*.properties
