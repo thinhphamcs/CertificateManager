@@ -12,6 +12,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -21,6 +22,23 @@ public class CertificateService {
 
     private static final int DEFAULT_PORT = 443;
     private static final int SOCKET_TIMEOUT_MS = 7000;
+
+    public List<CertificateInfo> checkAll(List<String> urls) {
+        return urls.parallelStream()
+                .map(this::check)
+                .sorted(Comparator.comparingInt(i -> statusOrder(i.getStatus())))
+                .collect(Collectors.toList());
+    }
+
+    private int statusOrder(String status) {
+        return switch (status) {
+            case "EXPIRED"  -> 0;
+            case "CRITICAL" -> 1;
+            case "WARNING"  -> 2;
+            case "ERROR"    -> 3;
+            default         -> 4; // VALID
+        };
+    }
 
     public CertificateInfo check(String rawUrl) {
         String host = parseHost(rawUrl);

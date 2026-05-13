@@ -14,7 +14,7 @@ CertificateManager is designed to run **on-premise or inside a private network**
 ┌─────────────────────────────────────────────────────────┐
 │                     Input Sources                       │
 │                                                         │
-│   [Manual URL]   [Excel Upload]*   [Oracle DB]*         │
+│   [Manual URL]   [Excel Upload]   [Oracle DB]*          │
 │        │               │                │               │
 └────────┼───────────────┼────────────────┼───────────────┘
          │               │                │
@@ -45,7 +45,7 @@ CertificateManager is designed to run **on-premise or inside a private network**
 └─────────────────────┘        └─────────────────────┘
 ```
 
-`*` = planned in a future phase
+`*` = planned
 
 ---
 
@@ -81,38 +81,47 @@ The core of the engine. Takes a raw URL or hostname and performs a direct TLS ha
 | `EXPIRED` | Past expiry date |
 | `ERROR` | Socket or handshake failure |
 
-### 3.2 CertificateController
+`checkAll(List<String> urls)` runs `check()` across all URLs via `parallelStream()` and sorts results by severity (EXPIRED → CRITICAL → WARNING → ERROR → VALID).
 
-A standard Spring MVC `@Controller` with two endpoints:
+### 3.2 ExcelParserService
+
+Reads an `.xlsx` file via Apache POI `WorkbookFactory`. Skips row 1 (header), extracts column A values from row 2 onward. Handles `STRING`, `NUMERIC`, and `FORMULA` cell types. Returns a `List<String>` of raw URL values passed directly to `CertificateService.checkAll()`.
+
+Expected Excel format: column A header = `URL`, one URL per row from row 2.
+
+### 3.3 CertificateController
+
+A standard Spring MVC `@Controller`:
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/` | Renders the empty dashboard |
-| `POST` | `/check` | Invokes `CertificateService.check()`, attaches result to model, re-renders dashboard |
+| `POST` | `/check` | Single URL check — invokes `CertificateService.check()`, attaches result to model |
+| `POST` | `/upload` | Bulk check — parses uploaded `.xlsx` via `ExcelParserService`, runs `checkAll()`, attaches `bulkResults` + `bulkSummary` (per-status counts) to model |
 
-### 3.3 Dashboard (Thymeleaf)
+### 3.4 Dashboard (Thymeleaf)
 
-Server-side rendered HTML using Thymeleaf and Bootstrap 5. No separate frontend build process or Node.js toolchain required. The template conditionally renders the result card only when a check has been performed.
+Server-side rendered HTML using Thymeleaf and Bootstrap 5. No separate frontend build process or Node.js toolchain required. Renders two independent result areas: a single-check result card and a bulk results table with summary chips (count by status).
 
 ---
 
-## 4. Data Flow — Phase by Phase
+## 4. Data Flows
 
-### Phase 1 (Current) — Manual Check
+### Single URL Check
 ```
-User enters URL → POST /check → CertificateService → result displayed in dashboard
-```
-
-### Phase 2 (Planned) — Excel Bulk Processing
-```
-User uploads .xlsx → Apache POI parses rows → CertificateService processes each URL
-→ Results table displayed → Optional export
+User enters URL → POST /check → CertificateService.check() → result card on dashboard
 ```
 
-### Phase 3 (Planned) — Enterprise Database Integration
+### Bulk Excel Upload
+```
+User uploads .xlsx → POST /upload → ExcelParserService.parseUrls()
+→ CertificateService.checkAll() (parallel) → results table + summary chips on dashboard
+```
+
+### DB Integration *(planned)*
 ```
 Oracle DB (service registry) → fetch active webservice list
-→ CertificateService processes each endpoint
+→ CertificateService.checkAll()
 → Results written to PostgreSQL (audit log, history, alerting)
 ```
 
@@ -131,6 +140,7 @@ Oracle DB (service registry) → fetch active webservice list
 | Decision | Rationale |
 |---|---|
 | Raw `SSLSocket` over HTTP client | Directly mirrors TLS negotiation; works on non-HTTP services; no dependency on URL scheme |
+| `parallelStream()` for bulk checks | Each TLS handshake is independent and I/O-bound; parallelism reduces wall-clock time proportionally to thread count |
 | Thymeleaf over React/SPA | Zero frontend build tooling; single deployable JAR; appropriate for an internal SRE tool |
 | Dual datasource (Oracle + PostgreSQL) | Oracle is the existing enterprise registry (read-only); PostgreSQL is the operational audit store (read-write) |
 | `DataSourceAutoConfiguration` excluded at startup | Prevents startup failure until datasource beans are manually wired in the `config/` package |

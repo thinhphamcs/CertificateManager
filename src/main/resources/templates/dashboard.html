@@ -28,6 +28,14 @@
         .san-pill { background-color: #13151a; border: 1px solid #2d3139; border-radius: 6px; font-size: 0.8rem; padding: 2px 8px; display: inline-block; margin: 2px; color: #8b949e; }
         .divider { border-color: #2d3139; }
         .hero-icon { font-size: 3rem; color: #58a6ff; }
+        .upload-zone { border: 2px dashed #2d3139; border-radius: 12px; padding: 1.5rem; cursor: pointer; transition: border-color 0.2s; }
+        .upload-zone:hover { border-color: #58a6ff; }
+        .btn-upload { background-color: #1f6feb; border: none; font-weight: 600; color: #fff; padding: 0.5rem 1.8rem; }
+        .btn-upload:hover { background-color: #388bfd; color: #fff; }
+        .summary-chip { border-radius: 50px; padding: 0.25rem 0.85rem; font-size: 0.8rem; font-weight: 700; }
+        .bulk-table th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: #8b949e; border-color: #2d3139; }
+        .bulk-table td { border-color: #2d3139; vertical-align: middle; font-size: 0.9rem; }
+        .bulk-table tbody tr:hover { background-color: #1c2230; }
     </style>
 </head>
 <body>
@@ -40,7 +48,7 @@
 <div class="container py-5">
 
     <!-- Check Form -->
-    <div class="card p-4 mb-4">
+    <div class="card p-4 mb-3">
         <h5 class="mb-3 fw-semibold">Check a Certificate</h5>
         <form action="/check" method="post">
             <div class="d-flex gap-2">
@@ -57,8 +65,101 @@
         </form>
     </div>
 
+    <!-- Excel Upload Form -->
+    <div class="card p-4 mb-4">
+        <h5 class="mb-3 fw-semibold"><i class="bi bi-file-earmark-spreadsheet me-2 text-success"></i>Bulk Check via Excel</h5>
+        <p class="text-secondary small mb-3">
+            Upload an <code>.xlsx</code> file with URLs in <strong>column A</strong>. Row 1 must be the header
+            (<code>URL</code>); data starts from row 2.
+        </p>
+        <form action="/upload" method="post" enctype="multipart/form-data">
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+                <div class="upload-zone flex-grow-1">
+                    <input type="file" class="form-control bg-transparent border-0 p-0"
+                           name="file" accept=".xlsx" required
+                           style="color:#8b949e;"/>
+                </div>
+                <button type="submit" class="btn btn-upload">
+                    <i class="bi bi-cloud-upload me-1"></i> Upload &amp; Scan
+                </button>
+            </div>
+        </form>
+        <div th:if="${uploadError != null}" class="alert mt-3 mb-0"
+             style="background:#1c1f26; border:1px solid #f85149; color:#f85149; border-radius:8px;">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+            <span th:text="${uploadError}"></span>
+        </div>
+    </div>
+
+    <!-- Bulk Results -->
+    <div th:if="${bulkResults != null}" class="card p-4 mb-4">
+
+        <!-- Header -->
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <h5 class="mb-0 fw-semibold">
+                <i class="bi bi-table me-2 text-info"></i>
+                Bulk Scan Results
+                <span class="text-secondary fw-normal small ms-2" th:text="'— ' + ${bulkFileName}"></span>
+            </h5>
+            <span class="text-secondary small" th:text="${#lists.size(bulkResults)} + ' URLs scanned'"></span>
+        </div>
+
+        <!-- Summary chips -->
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            <span class="summary-chip status-VALID"    th:text="'✓ Valid: '    + ${bulkSummary['VALID']    ?: 0}"></span>
+            <span class="summary-chip status-WARNING"  th:text="'⚠ Warning: '  + ${bulkSummary['WARNING']  ?: 0}"></span>
+            <span class="summary-chip status-CRITICAL" th:text="'! Critical: ' + ${bulkSummary['CRITICAL'] ?: 0}"></span>
+            <span class="summary-chip status-EXPIRED"  th:text="'✗ Expired: '  + ${bulkSummary['EXPIRED']  ?: 0}"></span>
+            <span class="summary-chip status-ERROR"    th:text="'? Error: '    + ${bulkSummary['ERROR']    ?: 0}"></span>
+        </div>
+
+        <!-- Table -->
+        <div class="table-responsive">
+            <table class="table bulk-table table-borderless mb-0">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Host</th>
+                        <th>Port</th>
+                        <th>Status</th>
+                        <th>Days Left</th>
+                        <th>Expires</th>
+                        <th>Certificate Authority</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr th:each="item, iter : ${bulkResults}">
+                        <td class="text-secondary" th:text="${iter.count}"></td>
+                        <td class="fw-semibold" th:text="${item.host}"></td>
+                        <td class="text-secondary" th:text="${item.port}"></td>
+                        <td>
+                            <span class="status-badge"
+                                  th:classappend="'status-' + ${item.status}"
+                                  th:text="${item.status}"></span>
+                        </td>
+                        <td>
+                            <span th:if="${item.status != 'ERROR'}"
+                                  th:classappend="${item.daysUntilExpiry < 0} ? 'text-danger' : (${item.daysUntilExpiry < 30} ? 'text-warning' : 'text-success')"
+                                  th:text="${item.daysUntilExpiry < 0} ? 'EXPIRED' : ${item.daysUntilExpiry}"></span>
+                            <span th:if="${item.status == 'ERROR'}" class="text-secondary">—</span>
+                        </td>
+                        <td class="text-secondary small">
+                            <span th:if="${item.expiryDate != null}"
+                                  th:text="${#dates.format(item.expiryDate, 'dd MMM yyyy')}"></span>
+                            <span th:if="${item.expiryDate == null}">—</span>
+                        </td>
+                        <td>
+                            <span th:if="${item.status != 'ERROR'}" th:text="${item.issuerOrg}"></span>
+                            <span th:if="${item.status == 'ERROR'}" class="text-danger small" th:text="${item.errorMessage}"></span>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     <!-- Empty state -->
-    <div th:if="${result == null}" class="text-center py-5 text-secondary">
+    <div th:if="${result == null and bulkResults == null}" class="text-center py-5 text-secondary">
         <div class="hero-icon mb-3"><i class="bi bi-shield-lock"></i></div>
         <p class="mb-1 fs-5 fw-semibold text-body">No certificate checked yet</p>
         <p class="small">Enter a hostname or URL above to inspect its SSL/TLS certificate.</p>
