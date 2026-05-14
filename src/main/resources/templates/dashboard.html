@@ -36,6 +36,14 @@
         .bulk-table th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: #8b949e; border-color: #2d3139; }
         .bulk-table td { border-color: #2d3139; vertical-align: middle; font-size: 0.9rem; }
         .bulk-table tbody tr:hover { background-color: #1c2230; }
+        .chain-node { background:#13151a; border:1px solid #2d3139; border-radius:8px; padding:6px 12px; min-width:130px; }
+        .chain-role { font-size:0.62rem; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:2px; }
+        .chain-leaf .chain-role { color:#58a6ff; }
+        .chain-intermediate .chain-role { color:#d29922; }
+        .chain-root .chain-role { color:#3fb950; }
+        .chain-cn { font-size:0.82rem; font-weight:600; color:#e6edf3; }
+        .chain-org { font-size:0.72rem; color:#5a6070; }
+        .chain-arrow { color:#5a6070; font-size:0.85rem; padding:0 4px; }
     </style>
 </head>
 <body>
@@ -101,7 +109,13 @@
                 Bulk Scan Results
                 <span class="text-secondary fw-normal small ms-2" th:text="'— ' + ${bulkFileName}"></span>
             </h5>
-            <span class="text-secondary small" th:text="${#lists.size(bulkResults)} + ' URLs scanned'"></span>
+            <div class="d-flex align-items-center gap-2">
+                <span class="text-secondary small" th:text="${#lists.size(bulkResults)} + ' URLs scanned'"></span>
+                <a href="/download" class="btn btn-sm"
+                   style="background:#1a4731; color:#3fb950; border:1px solid #2ea043;">
+                    <i class="bi bi-download me-1"></i> Download Excel
+                </a>
+            </div>
         </div>
 
         <!-- Summary chips -->
@@ -120,18 +134,17 @@
                     <tr>
                         <th>#</th>
                         <th>Host</th>
-                        <th>Port</th>
                         <th>Status</th>
                         <th>Days Left</th>
                         <th>Expires</th>
-                        <th>Certificate Authority</th>
+                        <th>Intermediate CA</th>
+                        <th>Root CA</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr th:each="item, iter : ${bulkResults}">
                         <td class="text-secondary" th:text="${iter.count}"></td>
                         <td class="fw-semibold" th:text="${item.host}"></td>
-                        <td class="text-secondary" th:text="${item.port}"></td>
                         <td>
                             <span class="status-badge"
                                   th:classappend="'status-' + ${item.status}"
@@ -148,9 +161,42 @@
                                   th:text="${#dates.format(item.expiryDate, 'dd MMM yyyy')}"></span>
                             <span th:if="${item.expiryDate == null}">—</span>
                         </td>
-                        <td>
-                            <span th:if="${item.status != 'ERROR'}" th:text="${item.issuerOrg}"></span>
-                            <span th:if="${item.status == 'ERROR'}" class="text-danger small" th:text="${item.errorMessage}"></span>
+
+                        <!-- Intermediate CA -->
+                        <td th:if="${item.status == 'ERROR'}" class="text-danger small" th:text="${item.errorMessage}"></td>
+                        <td th:if="${item.status != 'ERROR' and item.earliestIntermediateDays == -999}" class="text-secondary">—</td>
+                        <td th:if="${item.status != 'ERROR' and item.earliestIntermediateDays != -999}">
+                            <div class="fw-semibold small" th:text="${item.issuerOrg}"></div>
+                            <div class="text-secondary" style="font-size:0.72rem" th:text="${item.earliestIntermediateCN}"></div>
+                            <div class="d-flex align-items-center gap-1 mt-1">
+                                <span class="status-badge"
+                                      th:classappend="'status-' + ${item.earliestIntermediateStatus}"
+                                      th:text="${item.earliestIntermediateStatus}"></span>
+                                <span class="text-secondary" style="font-size:0.75rem"
+                                      th:text="${item.earliestIntermediateDays} + 'd'"></span>
+                                <span class="text-secondary" style="font-size:0.75rem"
+                                      th:if="${item.earliestIntermediateExpiry != null}"
+                                      th:text="'· ' + ${#dates.format(item.earliestIntermediateExpiry, 'dd MMM yyyy')}"></span>
+                            </div>
+                        </td>
+
+                        <!-- Root CA -->
+                        <td th:if="${item.status == 'ERROR'}" class="text-secondary">—</td>
+                        <td th:if="${item.status != 'ERROR' and !item.rootInChain}">
+                            <span class="text-secondary small">Missing Root</span>
+                        </td>
+                        <td th:if="${item.status != 'ERROR' and item.rootInChain}">
+                            <div class="fw-semibold small" th:text="${item.rootCACN}"></div>
+                            <div class="d-flex align-items-center gap-1 mt-1">
+                                <span class="status-badge"
+                                      th:classappend="'status-' + ${item.rootStatus}"
+                                      th:text="${item.rootStatus}"></span>
+                                <span class="text-secondary" style="font-size:0.75rem"
+                                      th:text="${item.rootDays} + 'd'"></span>
+                                <span class="text-secondary" style="font-size:0.75rem"
+                                      th:if="${item.rootExpiry != null}"
+                                      th:text="'· ' + ${#dates.format(item.rootExpiry, 'dd MMM yyyy')}"></span>
+                            </div>
                         </td>
                     </tr>
                 </tbody>
@@ -222,6 +268,28 @@
                     <div class="info-label">Certificate Authority — who signed &amp; vouches for it</div>
                     <div class="info-value fw-semibold" th:text="${result.issuerOrg}"></div>
                     <div class="info-raw" th:text="${result.issuerDNFormatted}"></div>
+                </div>
+
+                <!-- Trust Chain -->
+                <div class="col-12" th:if="${!result.trustChain.isEmpty()}">
+                    <div class="info-label">Trust Chain — how this certificate is verified</div>
+                    <div class="text-secondary small mb-2">Each certificate is signed by the one to its right. Browsers trust your cert because they trust the Root CA.</div>
+                    <div class="d-flex align-items-center flex-wrap gap-1 mt-2">
+                        <div th:each="entry, iter : ${result.trustChain}" class="d-flex align-items-center gap-1">
+                            <div class="chain-node" th:classappend="'chain-' + ${#strings.toLowerCase(entry.role)}">
+                                <div class="chain-role" th:text="${entry.role}"></div>
+                                <div class="chain-cn" th:text="${entry.subjectCN}"></div>
+                                <div class="chain-org" th:if="${!entry.organization.isEmpty()}" th:text="${entry.organization}"></div>
+                                <div class="mt-1">
+                                    <span class="status-badge"
+                                          th:classappend="'status-' + ${entry.status}"
+                                          th:text="${entry.daysUntilExpiry < 0} ? 'EXPIRED' : ${entry.daysUntilExpiry} + 'd'">
+                                    </span>
+                                </div>
+                            </div>
+                            <span th:if="${!iter.last}" class="chain-arrow">→</span>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- SANs -->

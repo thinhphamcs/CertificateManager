@@ -1,20 +1,20 @@
 package info.thinhpham.certificatemanager.service;
 
+import info.thinhpham.certificatemanager.model.CertChainEntry;
 import info.thinhpham.certificatemanager.model.CertificateInfo;
+import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
 
-import javax.net.ssl.SSLSocket;
-import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.*;
+import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateParsingException;
 import java.security.cert.X509Certificate;
+import javax.security.auth.x500.X500Principal;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
-import java.util.Collection;
-import java.util.Comparator;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -23,21 +23,29 @@ public class CertificateService {
     private static final int DEFAULT_PORT = 443;
     private static final int SOCKET_TIMEOUT_MS = 7000;
 
+    private Set<X500Principal> trustedRootSubjects = new HashSet<>();
+
+    @PostConstruct
+    private void loadTrustedRoots() {
+        try {
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            tmf.init((KeyStore) null);
+            for (TrustManager tm : tmf.getTrustManagers()) {
+                if (tm instanceof X509TrustManager xtm) {
+                    for (X509Certificate cert : xtm.getAcceptedIssuers()) {
+                        trustedRootSubjects.add(cert.getSubjectX500Principal());
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // fall back to position-based if trust store unavailable
+        }
+    }
+
     public List<CertificateInfo> checkAll(List<String> urls) {
         return urls.parallelStream()
                 .map(this::check)
-                .sorted(Comparator.comparingInt(i -> statusOrder(i.getStatus())))
-                .collect(Collectors.toList());
-    }
-
-    private int statusOrder(String status) {
-        return switch (status) {
-            case "EXPIRED"  -> 0;
-            case "CRITICAL" -> 1;
-            case "WARNING"  -> 2;
-            case "ERROR"    -> 3;
-            default         -> 4; // VALID
-        };
+                .collect(Collectors.toList()); // preserves original row order for export
     }
 
     public CertificateInfo check(String rawUrl) {
@@ -68,9 +76,9 @@ public class CertificateService {
                         extractSANs(leaf), resolveStatus(daysRemaining), null
                 );
                 info.setSubjectCN(parseDNComponent(subjectDN, "CN"));
-                // Prefer O (organisation name) for the CA label; fall back to CN
                 String org = parseDNComponent(issuerDN, "O");
                 info.setIssuerOrg(org.isEmpty() ? parseDNComponent(issuerDN, "CN") : org);
+                info.setTrustChain(buildTrustChain(chain));
 
                 return info;
             }
@@ -79,10 +87,32 @@ public class CertificateService {
         }
     }
 
-    /**
-     * Extracts a single attribute value from an X.500 DN string.
-     * e.g. parseDNComponent("CN=E7,O=Let's Encrypt,C=US", "O") → "Let's Encrypt"
-     */
+    private List<CertChainEntry> buildTrustChain(Certificate[] chain) {
+        List<CertChainEntry> result = new ArrayList<>();
+        for (int i = 0; i < chain.length; i++) {
+            X509Certificate cert = (X509Certificate) chain[i];
+            String subjectDN = cert.getSubjectX500Principal().getName();
+            String issuerDN  = cert.getIssuerX500Principal().getName();
+            String role;
+            if (i == 0) {
+                role = "Leaf";
+            } else if (!trustedRootSubjects.isEmpty()) {
+                role = trustedRootSubjects.contains(cert.getSubjectX500Principal()) ? "Root" : "Intermediate";
+            } else {
+                role = (i == chain.length - 1) ? "Root" : "Intermediate"; // fallback if trust store failed
+            }
+            Date expiry = cert.getNotAfter();
+            long days = ChronoUnit.DAYS.between(
+                    LocalDate.now(),
+                    expiry.toInstant().atZone(ZoneId.systemDefault()).toLocalDate());
+            result.add(new CertChainEntry(role,
+                    parseDNComponent(subjectDN, "CN"), parseDNComponent(subjectDN, "O"),
+                    parseDNComponent(issuerDN, "CN"),
+                    expiry, days, resolveStatus(days)));
+        }
+        return result;
+    }
+
     private String parseDNComponent(String dn, String key) {
         String prefix = key + "=";
         for (String part : dn.split(",")) {

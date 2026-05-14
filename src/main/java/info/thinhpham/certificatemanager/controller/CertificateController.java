@@ -2,7 +2,12 @@ package info.thinhpham.certificatemanager.controller;
 
 import info.thinhpham.certificatemanager.model.CertificateInfo;
 import info.thinhpham.certificatemanager.service.CertificateService;
+import info.thinhpham.certificatemanager.service.ExcelExportService;
 import info.thinhpham.certificatemanager.service.ExcelParserService;
+import jakarta.servlet.http.HttpSession;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -11,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -20,10 +26,14 @@ public class CertificateController {
 
     private final CertificateService certificateService;
     private final ExcelParserService excelParserService;
+    private final ExcelExportService excelExportService;
 
-    public CertificateController(CertificateService certificateService, ExcelParserService excelParserService) {
+    public CertificateController(CertificateService certificateService,
+                                 ExcelParserService excelParserService,
+                                 ExcelExportService excelExportService) {
         this.certificateService = certificateService;
         this.excelParserService = excelParserService;
+        this.excelExportService = excelExportService;
     }
 
     @GetMapping("/")
@@ -40,18 +50,51 @@ public class CertificateController {
     }
 
     @PostMapping("/upload")
-    public String upload(@RequestParam("file") MultipartFile file, Model model) {
+    public String upload(@RequestParam("file") MultipartFile file, Model model, HttpSession session) {
         try {
-            List<String> urls = excelParserService.parseUrls(file);
+            byte[] fileBytes = file.getBytes();
+            List<String> urls = excelParserService.parseUrls(fileBytes);
             List<CertificateInfo> results = certificateService.checkAll(urls);
-            Map<String, Long> summary = results.stream()
+
+            byte[] enriched = excelExportService.buildEnrichedExcel(fileBytes, results);
+            session.setAttribute("enrichedExcel", enriched);
+            session.setAttribute("enrichedExcelName", "audit_" + file.getOriginalFilename());
+
+            List<CertificateInfo> sortedResults = results.stream()
+                    .sorted(Comparator.comparingInt(i -> statusOrder(i.getStatus())))
+                    .collect(Collectors.toList());
+
+            Map<String, Long> summary = sortedResults.stream()
                     .collect(Collectors.groupingBy(CertificateInfo::getStatus, Collectors.counting()));
-            model.addAttribute("bulkResults", results);
+
+            model.addAttribute("bulkResults", sortedResults);
             model.addAttribute("bulkSummary", summary);
             model.addAttribute("bulkFileName", file.getOriginalFilename());
         } catch (IOException e) {
             model.addAttribute("uploadError", "Could not read Excel file: " + e.getMessage());
         }
         return "dashboard";
+    }
+
+    @GetMapping("/download")
+    public ResponseEntity<byte[]> download(HttpSession session) {
+        byte[] data = (byte[]) session.getAttribute("enrichedExcel");
+        String filename = (String) session.getAttribute("enrichedExcelName");
+        if (data == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(data);
+    }
+
+    private int statusOrder(String status) {
+        return switch (status) {
+            case "EXPIRED"  -> 0;
+            case "CRITICAL" -> 1;
+            case "WARNING"  -> 2;
+            case "ERROR"    -> 3;
+            default         -> 4;
+        };
     }
 }
