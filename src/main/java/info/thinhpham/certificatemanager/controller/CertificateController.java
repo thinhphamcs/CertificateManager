@@ -1,6 +1,8 @@
 package info.thinhpham.certificatemanager.controller;
 
 import info.thinhpham.certificatemanager.model.CertificateInfo;
+import info.thinhpham.certificatemanager.model.postgres.AuditResult;
+import info.thinhpham.certificatemanager.service.AuditService;
 import info.thinhpham.certificatemanager.service.CertificateService;
 import info.thinhpham.certificatemanager.service.ExcelExportService;
 import info.thinhpham.certificatemanager.service.ExcelParserService;
@@ -19,6 +21,7 @@ import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Controller
@@ -27,13 +30,16 @@ public class CertificateController {
     private final CertificateService certificateService;
     private final ExcelParserService excelParserService;
     private final ExcelExportService excelExportService;
+    private final AuditService auditService;
 
     public CertificateController(CertificateService certificateService,
                                  ExcelParserService excelParserService,
-                                 ExcelExportService excelExportService) {
+                                 ExcelExportService excelExportService,
+                                 Optional<AuditService> auditService) {
         this.certificateService = certificateService;
         this.excelParserService = excelParserService;
         this.excelExportService = excelExportService;
+        this.auditService = auditService.orElse(null);
     }
 
     @GetMapping("/")
@@ -86,6 +92,43 @@ public class CertificateController {
                 .contentType(MediaType.parseMediaType(
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                 .body(data);
+    }
+
+    @PostMapping("/audit/run")
+    public String runAudit(Model model) {
+        if (auditService == null) {
+            model.addAttribute("auditError", "Database not configured. Set db.oracle.enabled=true and db.postgres.enabled=true in application.yml.");
+            return "dashboard";
+        }
+        try {
+            List<AuditResult> results = auditService.runAudit();
+            model.addAttribute("auditResults", results);
+            model.addAttribute("auditSummary", summarise(results));
+        } catch (Exception e) {
+            model.addAttribute("auditError", "Audit failed: " + e.getMessage());
+        }
+        return "dashboard";
+    }
+
+    @GetMapping("/audit/history")
+    public String auditHistory(Model model) {
+        if (auditService == null) {
+            model.addAttribute("auditError", "Database not configured. Set db.oracle.enabled=true and db.postgres.enabled=true in application.yml.");
+            return "dashboard";
+        }
+        try {
+            List<AuditResult> results = auditService.getHistory();
+            model.addAttribute("auditResults", results);
+            model.addAttribute("auditSummary", summarise(results));
+        } catch (Exception e) {
+            model.addAttribute("auditError", "Could not load history: " + e.getMessage());
+        }
+        return "dashboard";
+    }
+
+    private Map<String, Long> summarise(List<AuditResult> results) {
+        return results.stream()
+                .collect(Collectors.groupingBy(AuditResult::getStatus, Collectors.counting()));
     }
 
     private int statusOrder(String status) {
