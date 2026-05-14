@@ -204,8 +204,101 @@
         </div>
     </div>
 
+    <!-- Oracle Inventory Audit -->
+    <div class="card p-4 mb-4">
+        <h5 class="mb-3 fw-semibold"><i class="bi bi-database me-2" style="color:#a78bfa;"></i>Oracle Inventory Audit</h5>
+        <p class="text-secondary small mb-3">
+            Reads active service URLs from Oracle <code>SERVICE_INVENTORY</code>, runs TLS checks in parallel,
+            and persists results to PostgreSQL. Enable both DBs in <code>application.yml</code> first.
+        </p>
+        <div class="d-flex gap-2 flex-wrap">
+            <form action="/audit/run" method="post">
+                <button type="submit" class="btn"
+                        style="background:#5b21b6; border:none; color:#fff; font-weight:600; padding:0.5rem 1.8rem;">
+                    <i class="bi bi-play-circle me-1"></i> Run Audit
+                </button>
+            </form>
+            <a href="/audit/history" class="btn"
+               style="background:#1c1f26; border:1px solid #4c1d95; color:#a78bfa; font-weight:600; padding:0.5rem 1.8rem;">
+                <i class="bi bi-clock-history me-1"></i> View History
+            </a>
+        </div>
+        <div th:if="${auditError != null}" class="alert mt-3 mb-0"
+             style="background:#1c1f26; border:1px solid #f85149; color:#f85149; border-radius:8px;">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+            <span th:text="${auditError}"></span>
+        </div>
+    </div>
+
+    <!-- Audit Results -->
+    <div th:if="${auditResults != null}" class="card p-4 mb-4">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <h5 class="mb-0 fw-semibold">
+                <i class="bi bi-database-check me-2" style="color:#a78bfa;"></i>
+                Audit Results
+                <span class="text-secondary fw-normal small ms-2"
+                      th:text="'— ' + ${#lists.size(auditResults)} + ' services'"></span>
+            </h5>
+            <a href="/audit/history" class="btn btn-sm"
+               style="background:#1c1f26; color:#a78bfa; border:1px solid #4c1d95;">
+                <i class="bi bi-clock-history me-1"></i> Full History
+            </a>
+        </div>
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            <span class="summary-chip status-VALID"    th:text="'✓ Valid: '    + ${auditSummary['VALID']    ?: 0}"></span>
+            <span class="summary-chip status-WARNING"  th:text="'⚠ Warning: '  + ${auditSummary['WARNING']  ?: 0}"></span>
+            <span class="summary-chip status-CRITICAL" th:text="'! Critical: ' + ${auditSummary['CRITICAL'] ?: 0}"></span>
+            <span class="summary-chip status-EXPIRED"  th:text="'✗ Expired: '  + ${auditSummary['EXPIRED']  ?: 0}"></span>
+            <span class="summary-chip status-ERROR"    th:text="'? Error: '    + ${auditSummary['ERROR']    ?: 0}"></span>
+        </div>
+        <div class="table-responsive">
+            <table class="table bulk-table table-borderless mb-0">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Host</th>
+                        <th>Status</th>
+                        <th>Days Left</th>
+                        <th>Expires</th>
+                        <th>Subject CN</th>
+                        <th>Issuer</th>
+                        <th>Checked At</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr th:each="item, iter : ${auditResults}">
+                        <td class="text-secondary" th:text="${iter.count}"></td>
+                        <td class="fw-semibold" th:text="${item.host}"></td>
+                        <td>
+                            <span class="status-badge"
+                                  th:classappend="'status-' + ${item.status}"
+                                  th:text="${item.status}"></span>
+                        </td>
+                        <td>
+                            <span th:if="${item.status != 'ERROR'}"
+                                  th:classappend="${item.daysUntilExpiry < 0} ? 'text-danger' : (${item.daysUntilExpiry < 30} ? 'text-warning' : 'text-success')"
+                                  th:text="${item.daysUntilExpiry < 0} ? 'EXPIRED' : ${item.daysUntilExpiry}"></span>
+                            <span th:if="${item.status == 'ERROR'}" class="text-secondary">—</span>
+                        </td>
+                        <td class="text-secondary small">
+                            <span th:if="${item.expiryDate != null}"
+                                  th:text="${#temporals.format(item.expiryDate, 'dd MMM yyyy')}"></span>
+                            <span th:if="${item.expiryDate == null}">—</span>
+                        </td>
+                        <td class="text-secondary small" th:text="${item.subjectCn ?: '—'}"></td>
+                        <td class="text-secondary small" th:text="${item.issuerOrg ?: '—'}"></td>
+                        <td class="text-secondary small">
+                            <span th:if="${item.checkedAt != null}"
+                                  th:text="${#temporals.format(item.checkedAt, 'dd MMM yyyy HH:mm')}"></span>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     <!-- Empty state -->
-    <div th:if="${result == null and bulkResults == null}" class="text-center py-5 text-secondary">
+    <div th:if="${result == null and bulkResults == null and auditResults == null and auditError == null}" class="text-center py-5 text-secondary">
         <div class="hero-icon mb-3"><i class="bi bi-shield-lock"></i></div>
         <p class="mb-1 fs-5 fw-semibold text-body">No certificate checked yet</p>
         <p class="small">Enter a hostname or URL above to inspect its SSL/TLS certificate.</p>
